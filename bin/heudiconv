@@ -558,11 +558,63 @@ def convert(items, symlink=True, converter=None,
             custom_callable(*item)
     shutil.rmtree(tmpdir)
 
+def find_dicoms_for_current_subject(subject_dir)
+    '''Find all DICOM files for a given subject
+
+    Parameters
+    ----------
+    subject_dir: a string that is an existing directory path or a string that
+                 is a valid glob pattern
+
+    Returns
+    -------
+    fl: a list of paths to all DICOM files under subject_dir
+    '''
+    if os.path.isdir(subject_dir):
+        fl = sorted(find_files('.*', topdir=subject_dir))
+    else:
+        fl = sorted(glob(subject_dir))
+        if not fl:
+            raise ValueError(
+                "subject_dir=%s is neither an existing directory to traverse, nor "
+                "a valid glob pattern containing DICOM files" % str(subject_id)
+            )
+    return fl
+
+def expand_subject_in_dicom_dir_template(dicom_dir_template, subjects):
+    '''Expands the subject placeholder in the DICOM dir template
+
+    Substitutes the subject placeholder in dicom_dir_template for each item in
+    the list of subjects. If you don't need to perform substitution for the subject
+    id in the dicom_dir_template (i.e. dicom_dir_template a path to a directory or
+    a valid glob pattern), set subjects to None.
+
+    Parameters
+    ----------
+    dicom_dir_template: a string that is an existing directory path or a string that
+                        is a valid glob pattern
+    subjects: a list of string with subject names
+
+    Returns
+    -------
+    zipped: a list of tuples where the first element of the tuple is a string
+        with the expanded dicom_dir_template for a subject and the second element
+        is a string with the subject id
+    '''
+    if subjects is None:
+        zipped = [ (dicom_dir_template, None) ]
+    else:
+        zipped = [ (dicom_dir_template % s, s) for s in subjects ]
+    return zipped
+
 
 def convert_dicoms(subjs, dicom_dir_template, outdir, heuristic_file, converter,
                    queue=None, anon_sid_cmd=None, anon_outdir=None, with_prov=False,
                    ses=None, is_bids=False):
-    for sid in subjs:
+
+    expanded_dicom_dir_template = expand_subject_in_dicom_dir_template(dicom_dir_template, subjs)
+
+    for (dicom_dir_for_current_subject, sid) in expanded_dicom_dir_template:
         tmpdir = None
         if queue:
             # TODO This needs to be updated to better scale with additional args
@@ -583,21 +635,7 @@ def convert_dicoms(subjs, dicom_dir_template, outdir, heuristic_file, converter,
             os.system(outcmd)
             continue
 
-        # TODO: RF into a function
-        # expand the input template
-        if sid:
-            sdir = dicom_dir_template % sid
-            # and see what matches
-            fl = sorted(glob(sdir))
-        else:
-            # we were given no subject so we consider dicom_dir_template to be
-            # and actual directory to process
-            if not isdir(dicom_dir_template):
-                raise ValueError(
-                    "No subject id was provided, and dicom_dir_template=%s is not "
-                    "an existing directory to traverse" % str(dicom_dir_template)
-                )
-            fl = sorted(find_files('.*', topdir=dicom_dir_template))
+        fl = find_dicoms_for_current_subject(dicom_dir_for_current_subject, sid)
 
         lgr.info("Processing %d dicoms", len(fl))
         dcmsessions = None
@@ -790,7 +828,7 @@ s3
                         in additions to directory. All matching tarballs for a
                         subject are extracted and their content processed in
                         a single pass''')
-    parser.add_argument('-s', '--subjects', dest='subjs', required=True,
+    parser.add_argument('-s', '--subjects', dest='subjs', default=None,
                         type=str, nargs='+', help='list of subjects')
     parser.add_argument('-c', '--converter', dest='converter',
                         required=True,
